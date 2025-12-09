@@ -1,5 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { buildMediaUrl } from '../config';
+import { sanitizeText } from '../utils/security';
 import './Navbar.css';
 
 function Navbar({ user, onLogout }) {
@@ -9,6 +11,9 @@ function Navbar({ user, onLogout }) {
     onLogout();
     navigate('/login');
   };
+
+  const sanitizedName = sanitizeText(user?.name) || 'User';
+  const photoUrl = user?.photo ? buildMediaUrl(user.photo) : null;
 
   return (
     <nav className="navbar">
@@ -21,10 +26,10 @@ function Navbar({ user, onLogout }) {
           <Link to="/create-job" className="nav-link">Post Job</Link>
           <Link to="/my-jobs" className="nav-link">My Jobs</Link>
           <div className="user-info">
-            {user.photo && (
-              <img src={`http://localhost:5000${user.photo}`} alt={user.name} className="user-photo" />
+            {photoUrl && (
+              <img src={photoUrl} alt={sanitizedName} className="user-photo" />
             )}
-            <span className="user-name">{user.name}</span>
+            <span className="user-name">{sanitizedName}</span>
           </div>
           <button onClick={handleLogout} className="btn-logout">Logout</button>
         </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jobAPI } from '../services/api';
+import { categorizeError, sanitizeFormFields, sanitizeText } from '../utils/security';
 import './CreateJobPost.css';
 
 function CreateJobPost({ user }) {
@@ -11,8 +12,8 @@ function CreateJobPost({ user }) {
     location: '',
     requirements: ''
   });
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -26,13 +27,24 @@ function CreateJobPost({ user }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    setError(null);
+    setSuccess(null);
     setLoading(true);
 
     try {
-      await jobAPI.createJob(formData);
-      setSuccess('Job posted successfully!');
+      const sanitizedFields = sanitizeFormFields(formData);
+
+      if (!sanitizedFields.title || !sanitizedFields.description) {
+        setError({
+          type: 'validation',
+          message: 'Title and description are required.',
+        });
+        setLoading(false);
+        return;
+      }
+
+      await jobAPI.createJob(sanitizedFields);
+      setSuccess({ type: 'success', message: 'Job posted successfully!' });
       // Reset form
       setFormData({
         title: '',
@@ -46,7 +58,7 @@ function CreateJobPost({ user }) {
         navigate('/feed');
       }, 2000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to post job. Please try again.');
+      setError(categorizeError(err));
     } finally {
       setLoading(false);
     }
@@ -123,8 +135,17 @@ function CreateJobPost({ user }) {
             />
           </div>
 
-          {error && <div className="error-message">{error}</div>}
-          {success && <div className="success-message">{success}</div>}
+          {error && (
+            <div className="error-message">
+              {error.type && <strong>{error.type.toUpperCase()}: </strong>}
+              {sanitizeText(error.message)}
+            </div>
+          )}
+          {success && (
+            <div className="success-message">
+              {sanitizeText(success.message)}
+            </div>
+          )}
 
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={loading}>

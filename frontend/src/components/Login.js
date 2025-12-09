@@ -1,25 +1,33 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
+import { categorizeError, isValidEmail, sanitizeText } from '../utils/security';
 import './Auth.css';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setError(null);
     setLoading(true);
 
     try {
-      const response = await authAPI.login(email);
+      const sanitizedEmail = sanitizeText(email).toLowerCase();
+
+      if (!isValidEmail(sanitizedEmail)) {
+        setError({ type: 'validation', message: 'Please enter a valid email address.' });
+        setLoading(false);
+        return;
+      }
+      const response = await authAPI.login(sanitizedEmail);
       onLogin(response.data.user);
       navigate('/feed');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      setError(categorizeError(err));
     } finally {
       setLoading(false);
     }
@@ -44,7 +52,12 @@ function Login({ onLogin }) {
             />
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div className="error-message">
+              {error.type && <strong>{error.type.toUpperCase()}: </strong>}
+              {error.message}
+            </div>
+          )}
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}

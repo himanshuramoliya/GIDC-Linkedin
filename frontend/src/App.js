@@ -6,6 +6,7 @@ import JobFeed from './components/JobFeed';
 import CreateJobPost from './components/CreateJobPost';
 import MyJobs from './components/MyJobs';
 import Navbar from './components/Navbar';
+import { sanitizeUserProfile } from './utils/security';
 import './App.css';
 
 function App() {
@@ -15,13 +16,27 @@ function App() {
     // Check if user is logged in (stored in localStorage)
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        const sanitizedUser = sanitizeUserProfile(parsedUser);
+        if (sanitizedUser?.id) {
+          setUser(sanitizedUser);
+        } else {
+          localStorage.removeItem('user');
+        }
+      } catch (err) {
+        localStorage.removeItem('user');
+      }
     }
   }, []);
 
   const handleLogin = (userData) => {
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
+    const sanitizedUser = sanitizeUserProfile(userData);
+    if (!sanitizedUser?.id) {
+      return;
+    }
+    setUser(sanitizedUser);
+    localStorage.setItem('user', JSON.stringify(sanitizedUser));
   };
 
   const handleLogout = () => {

@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
+import {
+  categorizeError,
+  isValidEmail,
+  sanitizeFormFields,
+  sanitizeText,
+} from '../utils/security';
 import './Auth.css';
 
 function Register({ onLogin }) {
@@ -10,7 +16,7 @@ function Register({ onLogin }) {
     phone: '',
     photo: null
   });
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [photoPreview, setPhotoPreview] = useState(null);
   const navigate = useNavigate();
@@ -41,14 +47,42 @@ function Register({ onLogin }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setError(null);
     setLoading(true);
 
     try {
+      const sanitizedFields = sanitizeFormFields({
+        name: formData.name,
+        email: formData.email.toLowerCase(),
+        phone: formData.phone,
+      });
+
+      if (!sanitizedFields.name) {
+        setError({ type: 'validation', message: 'Full name is required.' });
+        setLoading(false);
+        return;
+      }
+
+      if (!isValidEmail(sanitizedFields.email)) {
+        setError({ type: 'validation', message: 'Please enter a valid email address.' });
+        setLoading(false);
+        return;
+      }
+
+      const normalizedPhone = sanitizedFields.phone.replace(/[^0-9+]/g, '');
+      if (normalizedPhone.length < 7 || normalizedPhone.length > 15) {
+        setError({
+          type: 'validation',
+          message: 'Please enter a valid phone number (7-15 digits).',
+        });
+        setLoading(false);
+        return;
+      }
+
       const formDataToSend = new FormData();
-      formDataToSend.append('name', formData.name);
-      formDataToSend.append('email', formData.email);
-      formDataToSend.append('phone', formData.phone);
+      formDataToSend.append('name', sanitizedFields.name);
+      formDataToSend.append('email', sanitizedFields.email);
+      formDataToSend.append('phone', normalizedPhone);
       if (formData.photo) {
         formDataToSend.append('photo', formData.photo);
       }
@@ -57,7 +91,7 @@ function Register({ onLogin }) {
       onLogin(response.data.user);
       navigate('/feed');
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed. Please try again.');
+      setError(categorizeError(err));
     } finally {
       setLoading(false);
     }
@@ -123,7 +157,12 @@ function Register({ onLogin }) {
             )}
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div className="error-message">
+              {error.type && <strong>{error.type.toUpperCase()}: </strong>}
+              {sanitizeText(error.message)}
+            </div>
+          )}
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Creating account...' : 'Sign Up'}

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { jobAPI } from '../services/api';
+import { categorizeError, sanitizeText } from '../utils/security';
 import './MyJobs.css';
 
 function MyJobs({ user }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
+  const [feedback, setFeedback] = useState(null);
 
   useEffect(() => {
     loadMyJobs();
@@ -15,9 +17,18 @@ function MyJobs({ user }) {
     try {
       setLoading(true);
       const response = await jobAPI.getUserJobs(user.id);
-      setJobs(response.data);
+      const sanitizedJobs = response.data.map((job) => ({
+        ...job,
+        title: sanitizeText(job.title),
+        description: sanitizeText(job.description),
+        company: sanitizeText(job.company),
+        location: sanitizeText(job.location),
+        requirements: sanitizeText(job.requirements),
+      }));
+      setJobs(sanitizedJobs);
+      setError(null);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load your jobs');
+      setError(categorizeError(err));
     } finally {
       setLoading(false);
     }
@@ -36,9 +47,9 @@ function MyJobs({ user }) {
           job.id === jobId ? { ...job, isClosed: true } : job
         )
       );
-      alert('Job marked as closed successfully!');
+      setFeedback({ type: 'success', message: 'Job marked as closed successfully!' });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to close job');
+      setFeedback(categorizeError(err));
     }
   };
 
@@ -53,7 +64,16 @@ function MyJobs({ user }) {
   if (error) {
     return (
       <div className="container">
-        <div className="error-message">{error}</div>
+        <div className="error-message">
+          {error.type && <strong>{error.type.toUpperCase()}: </strong>}
+          {sanitizeText(error.message)}
+        </div>
+      {feedback && (
+        <div className={`card ${feedback.type === 'success' ? 'success-message' : 'error-message'}`}>
+          {feedback.type && <strong>{feedback.type.toUpperCase()}: </strong>}
+          {sanitizeText(feedback.message)}
+        </div>
+      )}
       </div>
     );
   }
@@ -100,23 +120,29 @@ function MyJobs({ user }) {
 }
 
 function JobCard({ job, onClose, isClosed }) {
+  const title = sanitizeText(job.title);
+  const company = sanitizeText(job.company);
+  const location = sanitizeText(job.location);
+  const description = sanitizeText(job.description);
+  const requirements = sanitizeText(job.requirements);
+
   return (
     <div className={`job-card ${isClosed ? 'closed' : ''}`}>
       {isClosed && <div className="closed-badge">CLOSED</div>}
       
       <div className="job-content">
-        <h2 className="job-title">{job.title}</h2>
-        {job.company && (
-          <p className="job-company">Company: {job.company}</p>
+        <h2 className="job-title">{title}</h2>
+        {company && (
+          <p className="job-company">Company: {company}</p>
         )}
-        {job.location && (
-          <p className="job-location">Location: {job.location}</p>
+        {location && (
+          <p className="job-location">Location: {location}</p>
         )}
-        <p className="job-description">{job.description}</p>
-        {job.requirements && (
+        <p className="job-description">{description}</p>
+        {requirements && (
           <div className="job-requirements">
             <strong>Requirements:</strong>
-            <p>{job.requirements}</p>
+            <p>{requirements}</p>
           </div>
         )}
         <p className="job-date">
