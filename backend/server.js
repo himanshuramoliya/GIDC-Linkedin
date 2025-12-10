@@ -1,3 +1,6 @@
+// Load environment variables first
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -47,25 +50,50 @@ const upload = multer({
   }
 });
 
-// Import data layer
+// Import data layer and auth utilities
 const dataLayer = require('./data/dataLayer');
+const {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyAccessToken,
+  verifyRefreshToken,
+  revokeAllUserTokens
+} = require('./utils/auth');
 
 // Initialize data storage
 dataLayer.initialize();
 
-// Authentication middleware
+// JWT Authentication middleware
 const authenticate = (req, res, next) => {
-  const userId = req.headers['user-id'];
-  if (!userId) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    // Fallback to legacy user-id header for backward compatibility during transition
+    const userId = req.headers['user-id'];
+    if (userId) {
+      const user = dataLayer.getUserById(userId);
+      if (user) {
+        req.userId = userId;
+        req.user = user;
+        return next();
+      }
+    }
     return res.status(401).json({ error: 'Authentication required' });
   }
-  
-  const user = dataLayer.getUserById(userId);
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid user' });
+
+  const decoded = verifyAccessToken(token);
+  if (!decoded) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
-  
-  req.userId = userId;
+
+  const user = dataLayer.getUserById(decoded.userId);
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+
+  req.userId = decoded.userId;
+  req.user = user;
   next();
 };
 
@@ -79,10 +107,14 @@ app.get('/api/health', (req, res) => {
 // User Registration
 app.post('/api/auth/register', upload.single('photo'), (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, email, phone, role } = req.body;
     
-    if (!name || !email || !phone) {
-      return res.status(400).json({ error: 'Name, email, and phone are required' });
+    if (!name || !email || !phone || !role) {
+      return res.status(400).json({ error: 'Name, email, phone, and role are required' });
+    }
+
+    if (!['employer', 'employee'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be either "employer" or "employee"' });
     }
 
     // Check if user already exists
@@ -93,12 +125,45 @@ app.post('/api/auth/register', upload.single('photo'), (req, res) => {
 
     const photoUrl = req.file ? `/uploads/${req.file.filename}` : null;
     
+    // Parse role-specific data
+    let roleData = {};
+    if (role === 'employer') {
+      const { companyName, companyLocation, companyDescription } = req.body;
+      if (!companyName || !companyLocation) {
+        return res.status(400).json({ error: 'Company name and location are required for employers' });
+      }
+      roleData = {
+        companyName: companyName.trim(),
+        companyLocation: companyLocation.trim(),
+        companyDescription: companyDescription?.trim() || ''
+      };
+    } else if (role === 'employee') {
+      // Parse experience data (JSON string or object)
+      let experiences = [];
+      if (req.body.experiences) {
+        try {
+          experiences = typeof req.body.experiences === 'string' 
+            ? JSON.parse(req.body.experiences) 
+            : req.body.experiences;
+        } catch (e) {
+          return res.status(400).json({ error: 'Invalid experiences format' });
+        }
+      }
+      roleData = { experiences };
+    }
+    
     const user = dataLayer.createUser({
       name,
       email,
       phone,
-      photo: photoUrl
+      photo: photoUrl,
+      role,
+      ...roleData
     });
+
+    // Generate tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
 
     res.status(201).json({ 
       message: 'User created successfully',
@@ -107,15 +172,19 @@ app.post('/api/auth/register', upload.single('photo'), (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        photo: user.photo
-      }
+        photo: user.photo,
+        role: user.role,
+        ...roleData
+      },
+      accessToken,
+      refreshToken
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// User Login (simple email-based for now)
+// User Login
 app.post('/api/auth/login', (req, res) => {
   try {
     const { email } = req.body;
@@ -129,16 +198,78 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Generate tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // Prepare user response (include role-specific data)
+    const userResponse = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      photo: user.photo,
+      role: user.role
+    };
+
+    if (user.role === 'employer') {
+      userResponse.companyName = user.companyName;
+      userResponse.companyLocation = user.companyLocation;
+      userResponse.companyDescription = user.companyDescription;
+    } else if (user.role === 'employee') {
+      userResponse.experiences = user.experiences || [];
+    }
+
     res.json({ 
       message: 'Login successful',
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        photo: user.photo
-      }
+      user: userResponse,
+      accessToken,
+      refreshToken
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Refresh token endpoint
+app.post('/api/auth/refresh', (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token is required' });
+    }
+
+    const decoded = verifyRefreshToken(refreshToken);
+    if (!decoded) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    const user = dataLayer.getUserById(decoded.userId);
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // Generate new access token
+    const accessToken = generateAccessToken(user);
+
+    res.json({
+      accessToken
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', authenticate, (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      const { revokeRefreshToken } = require('./utils/auth');
+      revokeRefreshToken(refreshToken);
+    }
+    res.json({ message: 'Logged out successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -152,21 +283,37 @@ app.get('/api/users/:userId', authenticate, (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({
+    const userResponse = {
       id: user.id,
       name: user.name,
       email: user.email,
       phone: user.phone,
-      photo: user.photo
-    });
+      photo: user.photo,
+      role: user.role
+    };
+
+    if (user.role === 'employer') {
+      userResponse.companyName = user.companyName;
+      userResponse.companyLocation = user.companyLocation;
+      userResponse.companyDescription = user.companyDescription;
+    } else if (user.role === 'employee') {
+      userResponse.experiences = user.experiences || [];
+    }
+
+    res.json(userResponse);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create job post
+// Create job post (employers only)
 app.post('/api/jobs', authenticate, (req, res) => {
   try {
+    // Check if user is an employer
+    if (req.user.role !== 'employer') {
+      return res.status(403).json({ error: 'Only employers can post jobs' });
+    }
+
     const { title, description, company, location, requirements } = req.body;
     
     if (!title || !description) {
@@ -176,8 +323,8 @@ app.post('/api/jobs', authenticate, (req, res) => {
     const job = dataLayer.createJob({
       title,
       description,
-      company: company || '',
-      location: location || '',
+      company: company || req.user.companyName || '',
+      location: location || req.user.companyLocation || '',
       requirements: requirements || '',
       postedBy: req.userId
     });
@@ -285,6 +432,53 @@ app.get('/api/users/:userId/jobs', authenticate, (req, res) => {
   try {
     const jobs = dataLayer.getJobsByUser(req.params.userId);
     res.json(jobs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get applicants for a job (employers only)
+app.get('/api/jobs/:jobId/applicants', authenticate, (req, res) => {
+  try {
+    const job = dataLayer.getJobById(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    // Check if user is the job poster
+    if (job.postedBy !== req.userId) {
+      return res.status(403).json({ error: 'You can only view applicants for your own jobs' });
+    }
+
+    // Check if user is an employer
+    const user = dataLayer.getUserById(req.userId);
+    if (user.role !== 'employer') {
+      return res.status(403).json({ error: 'Only employers can view applicants' });
+    }
+
+    const interests = dataLayer.getInterestsByJob(req.params.jobId);
+    
+    // Get full user profiles for each applicant
+    const applicants = interests.map(interest => {
+      const applicant = dataLayer.getUserById(interest.userId);
+      if (!applicant) return null;
+      
+      return {
+        interestId: interest.id,
+        appliedAt: interest.createdAt,
+        user: {
+          id: applicant.id,
+          name: applicant.name,
+          email: applicant.email,
+          phone: applicant.phone,
+          photo: applicant.photo,
+          role: applicant.role,
+          experiences: applicant.experiences || []
+        }
+      };
+    }).filter(Boolean);
+
+    res.json(applicants);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

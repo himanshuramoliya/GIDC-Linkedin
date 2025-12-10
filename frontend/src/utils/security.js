@@ -41,13 +41,31 @@ export const sanitizeUserProfile = (user = {}) => {
     return null;
   }
 
-  return {
+  const sanitized = {
     id: sanitizeText(user.id),
     name: sanitizeText(user.name),
     email: sanitizeText(user.email),
     phone: sanitizeText(user.phone),
     photo: sanitizeText(user.photo),
+    role: sanitizeText(user.role) || 'employee',
   };
+
+  // Add role-specific fields
+  if (user.role === 'employer') {
+    sanitized.companyName = sanitizeText(user.companyName);
+    sanitized.companyLocation = sanitizeText(user.companyLocation);
+    sanitized.companyDescription = sanitizeText(user.companyDescription);
+  } else if (user.role === 'employee') {
+    sanitized.experiences = Array.isArray(user.experiences) 
+      ? user.experiences.map(exp => ({
+          company: sanitizeText(exp.company),
+          position: sanitizeText(exp.position),
+          years: typeof exp.years === 'number' ? exp.years : parseFloat(exp.years) || 0
+        }))
+      : [];
+  }
+
+  return sanitized;
 };
 
 export const categorizeError = (err) => {

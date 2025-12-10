@@ -76,8 +76,19 @@ function createUser(userData) {
     email: userData.email,
     phone: userData.phone,
     photo: userData.photo || null,
+    role: userData.role || 'employee',
     createdAt: new Date().toISOString()
   };
+
+  // Add role-specific data
+  if (userData.role === 'employer') {
+    user.companyName = userData.companyName || '';
+    user.companyLocation = userData.companyLocation || '';
+    user.companyDescription = userData.companyDescription || '';
+  } else if (userData.role === 'employee') {
+    user.experiences = userData.experiences || [];
+  }
+
   users.push(user);
   writeUsers(users);
   return user;

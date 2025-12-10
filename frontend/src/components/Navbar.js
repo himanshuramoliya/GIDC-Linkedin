@@ -23,8 +23,12 @@ function Navbar({ user, onLogout }) {
         </Link>
         <div className="navbar-links">
           <Link to="/feed" className="nav-link">Feed</Link>
-          <Link to="/create-job" className="nav-link">Post Job</Link>
-          <Link to="/my-jobs" className="nav-link">My Jobs</Link>
+          {user?.role === 'employer' && (
+            <Link to="/create-job" className="nav-link">Post Job</Link>
+          )}
+          {user?.role === 'employer' && (
+            <Link to="/my-jobs" className="nav-link">My Jobs</Link>
+          )}
           <div className="user-info">
             {photoUrl && (
               <img src={photoUrl} alt={sanitizedName} className="user-photo" />

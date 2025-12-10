@@ -14,11 +14,19 @@ function Register({ onLogin }) {
     name: '',
     email: '',
     phone: '',
-    photo: null
+    photo: null,
+    role: 'employee',
+    // Employer fields
+    companyName: '',
+    companyLocation: '',
+    companyDescription: '',
+    // Employee fields
+    experiences: []
   });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [newExperience, setNewExperience] = useState({ company: '', years: '', position: '' });
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -43,6 +51,50 @@ function Register({ onLogin }) {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleRoleChange = (e) => {
+    const role = e.target.value;
+    setFormData(prev => ({
+      ...prev,
+      role,
+      companyName: '',
+      companyLocation: '',
+      companyDescription: '',
+      experiences: []
+    }));
+  };
+
+  const handleAddExperience = () => {
+    if (!newExperience.company || !newExperience.years || !newExperience.position) {
+      setError({ type: 'validation', message: 'Please fill all experience fields' });
+      return;
+    }
+
+    const years = parseFloat(newExperience.years);
+    if (isNaN(years) || years <= 0) {
+      setError({ type: 'validation', message: 'Years of experience must be a positive number' });
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      experiences: [...prev.experiences, {
+        company: sanitizeText(newExperience.company),
+        years: years,
+        position: sanitizeText(newExperience.position)
+      }]
+    }));
+
+    setNewExperience({ company: '', years: '', position: '' });
+    setError(null);
+  };
+
+  const handleRemoveExperience = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      experiences: prev.experiences.filter((_, i) => i !== index)
+    }));
   };
 
   const handleSubmit = async (e) => {
@@ -79,16 +131,40 @@ function Register({ onLogin }) {
         return;
       }
 
+      // Role-specific validation
+      if (formData.role === 'employer') {
+        if (!formData.companyName.trim() || !formData.companyLocation.trim()) {
+          setError({ type: 'validation', message: 'Company name and location are required for employers.' });
+          setLoading(false);
+          return;
+        }
+      }
+
       const formDataToSend = new FormData();
       formDataToSend.append('name', sanitizedFields.name);
       formDataToSend.append('email', sanitizedFields.email);
       formDataToSend.append('phone', normalizedPhone);
+      formDataToSend.append('role', formData.role);
+
       if (formData.photo) {
         formDataToSend.append('photo', formData.photo);
       }
 
+      // Add role-specific data
+      if (formData.role === 'employer') {
+        formDataToSend.append('companyName', sanitizeText(formData.companyName));
+        formDataToSend.append('companyLocation', sanitizeText(formData.companyLocation));
+        formDataToSend.append('companyDescription', sanitizeText(formData.companyDescription || ''));
+      } else if (formData.role === 'employee') {
+        formDataToSend.append('experiences', JSON.stringify(formData.experiences));
+      }
+
       const response = await authAPI.register(formDataToSend);
-      onLogin(response.data.user);
+      onLogin(
+        response.data.user,
+        response.data.accessToken,
+        response.data.refreshToken
+      );
       navigate('/feed');
     } catch (err) {
       setError(categorizeError(err));
@@ -142,6 +218,119 @@ function Register({ onLogin }) {
               placeholder="Enter your phone number"
             />
           </div>
+
+          <div className="form-group">
+            <label htmlFor="role">Role</label>
+            <select
+              id="role"
+              name="role"
+              value={formData.role}
+              onChange={handleRoleChange}
+              required
+            >
+              <option value="employee">Employee</option>
+              <option value="employer">Employer</option>
+            </select>
+          </div>
+
+          {formData.role === 'employer' && (
+            <>
+              <div className="form-group">
+                <label htmlFor="companyName">Company Name *</label>
+                <input
+                  type="text"
+                  id="companyName"
+                  name="companyName"
+                  value={formData.companyName}
+                  onChange={(e) => setFormData(prev => ({ ...prev, companyName: e.target.value }))}
+                  required
+                  placeholder="Enter your company name"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="companyLocation">Company Location *</label>
+                <input
+                  type="text"
+                  id="companyLocation"
+                  name="companyLocation"
+                  value={formData.companyLocation}
+                  onChange={(e) => setFormData(prev => ({ ...prev, companyLocation: e.target.value }))}
+                  required
+                  placeholder="Enter company location"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="companyDescription">Company Description (Optional)</label>
+                <textarea
+                  id="companyDescription"
+                  name="companyDescription"
+                  value={formData.companyDescription}
+                  onChange={(e) => setFormData(prev => ({ ...prev, companyDescription: e.target.value }))}
+                  rows="3"
+                  placeholder="Describe your company"
+                />
+              </div>
+            </>
+          )}
+
+          {formData.role === 'employee' && (
+            <>
+              <div className="form-group">
+                <label>Work Experience (Optional)</label>
+                <div style={{ marginBottom: '10px' }}>
+                  <input
+                    type="text"
+                    placeholder="Company name"
+                    value={newExperience.company}
+                    onChange={(e) => setNewExperience(prev => ({ ...prev, company: e.target.value }))}
+                    style={{ marginRight: '10px', marginBottom: '5px', width: '30%' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Position"
+                    value={newExperience.position}
+                    onChange={(e) => setNewExperience(prev => ({ ...prev, position: e.target.value }))}
+                    style={{ marginRight: '10px', marginBottom: '5px', width: '30%' }}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Years"
+                    value={newExperience.years}
+                    onChange={(e) => setNewExperience(prev => ({ ...prev, years: e.target.value }))}
+                    min="0"
+                    step="0.5"
+                    style={{ marginRight: '10px', marginBottom: '5px', width: '15%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddExperience}
+                    className="btn btn-secondary"
+                    style={{ marginBottom: '5px' }}
+                  >
+                    Add
+                  </button>
+                </div>
+                {formData.experiences.length > 0 && (
+                  <ul style={{ listStyle: 'none', padding: 0 }}>
+                    {formData.experiences.map((exp, index) => (
+                      <li key={index} style={{ marginBottom: '5px', padding: '5px', background: '#f5f5f5', borderRadius: '4px' }}>
+                        {exp.company} - {exp.position} ({exp.years} years)
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveExperience(index)}
+                          style={{ marginLeft: '10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '3px', padding: '2px 8px', cursor: 'pointer' }}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
 
           <div className="form-group">
             <label htmlFor="photo">Profile Photo (Optional)</label>

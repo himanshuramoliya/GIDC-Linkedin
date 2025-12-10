@@ -24,7 +24,11 @@ function Login({ onLogin }) {
         return;
       }
       const response = await authAPI.login(sanitizedEmail);
-      onLogin(response.data.user);
+      onLogin(
+        response.data.user,
+        response.data.accessToken,
+        response.data.refreshToken
+      );
       navigate('/feed');
     } catch (err) {
       setError(categorizeError(err));
